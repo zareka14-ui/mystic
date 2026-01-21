@@ -1,8 +1,8 @@
 
 
-Вот полностью исправленный файл `main.py` с обновленной моделью AI (`llama-3.3-70b-versatile`) и настройкой для Render Web Service.
+Ты скопировал мой текст с объяснением вместе с кодом. Вставлять нужно **только то, что находится в черном блоке с кодом**, без русского текста сверху и снизу.
 
-Скопируй и замени весь код в файле:
+Вот чистый код. Скопируй его целиком (от `import asyncio` и до конца):
 
 ```python
 import asyncio
@@ -157,7 +157,6 @@ async def ask_mystic(user_prompt: str) -> str:
                 {"role": "system", "content": MYSTIC_PERSONA},
                 {"role": "user", "content": user_prompt}
             ],
-            # ИСПРАВЛЕНО: Обновленная модель Groq
             model="llama-3.3-70b-versatile",
             temperature=0.8,
             max_tokens=1200,
