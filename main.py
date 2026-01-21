@@ -1,10 +1,3 @@
-
-
-Ты скопировал мой текст с объяснением вместе с кодом. Вставлять нужно **только то, что находится в черном блоке с кодом**, без русского текста сверху и снизу.
-
-Вот чистый код. Скопируй его целиком (от `import asyncio` и до конца):
-
-```python
 import asyncio
 import logging
 import os
@@ -306,4 +299,3 @@ if __name__ == "__main__":
         asyncio.run(main())
     except KeyboardInterrupt:
         print("Bot stopped.")
-```
