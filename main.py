@@ -1,3 +1,10 @@
+
+
+Вот полностью исправленный файл `main.py` с обновленной моделью AI (`llama-3.3-70b-versatile`) и настройкой для Render Web Service.
+
+Скопируй и замени весь код в файле:
+
+```python
 import asyncio
 import logging
 import os
@@ -150,7 +157,8 @@ async def ask_mystic(user_prompt: str) -> str:
                 {"role": "system", "content": MYSTIC_PERSONA},
                 {"role": "user", "content": user_prompt}
             ],
-            model="llama-3.1-70b-versatile",
+            # ИСПРАВЛЕНО: Обновленная модель Groq
+            model="llama-3.3-70b-versatile",
             temperature=0.8,
             max_tokens=1200,
         )
@@ -299,3 +307,4 @@ if __name__ == "__main__":
         asyncio.run(main())
     except KeyboardInterrupt:
         print("Bot stopped.")
+```
