@@ -7,28 +7,19 @@ import random
 import urllib.parse
 from datetime import datetime
 
-# Aiogram
 from aiogram import Bot, Dispatcher, types, F
 from aiogram.filters import Command
-from aiogram.types import ReplyKeyboardMarkup, KeyboardButton
+from aiogram.types import ReplyKeyboardMarkup, KeyboardButton, InlineKeyboardMarkup, InlineKeyboardButton
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
-
-# Web Server (для Render/Keep-alive)
 from aiohttp import web
-
-# AI и конфиг
 from dotenv import load_dotenv
 from groq import AsyncGroq
 
-# --- КОНФИГУРАЦИЯ ---
 load_dotenv()
 TOKEN = os.getenv("BOT_TOKEN")
 GROQ_API_KEY = os.getenv("GROQ_API_KEY")
 PORT = int(os.getenv("PORT", 8080))
-
-if not TOKEN or not GROQ_API_KEY:
-    sys.exit("ОШИБКА: Не заданы BOT_TOKEN или GROQ_API_KEY в .env")
 
 bot = Bot(token=TOKEN)
 dp = Dispatcher()
@@ -36,7 +27,7 @@ groq_client = AsyncGroq(api_key=GROQ_API_KEY)
 
 logging.basicConfig(level=logging.INFO, stream=sys.stdout)
 
-# --- БАЗА ДАННЫХ (JSON) ---
+# --- БАЗА ДАННЫХ ---
 DB_FILE = "users_data.json"
 
 def load_db():
@@ -44,274 +35,219 @@ def load_db():
         if os.path.exists(DB_FILE):
             with open(DB_FILE, "r", encoding="utf-8") as f:
                 return json.load(f)
-    except Exception: return {}
+    except: return {}
     return {}
 
 def save_db(data):
     with open(DB_FILE, "w", encoding="utf-8") as f:
         json.dump(data, f, ensure_ascii=False, indent=4)
 
-def get_user_birthdate(user_id):
-    return load_db().get(str(user_id), {}).get("birthdate")
-
-def set_user_birthdate(user_id, birthdate):
-    db = load_db()
-    if str(user_id) not in db: db[str(user_id)] = {}
-    db[str(user_id)]["birthdate"] = birthdate
-    save_db(db)
-
-# --- ДАННЫЕ И ПЕРСОНА ---
-ZODIAC_SIGNS = [
-    "♈ Овен", "♉ Телец", "♊ Близнецы", "♋ Рак",
-    "♌ Лев", "♍ Дева", "♎ Весы", "♏ Скорпион",
-    "♐ Стрелец", "♑ Козерог", "♒ Водолей", "♓ Рыбы"
-]
-
-ROD_CARDS = [
-    "Алтарь Предков", "Родовой Дуб", "Прадед", "Праматерь", "Семейный Очаг",
-    "Печать Рода", "Нить Судьбы", "Защитник", "Материнское Благословение",
-    "Отцовский Щит", "Древо Жизни", "Кострище", "Дом Духа", "Зов Крови",
-    "Путь Воина", "Мудрость Старца", "Хранитель Порога", "Ключ от Тайны",
-    "Семейный Сундук", "Связь Поколений", "Дар Земли", "Сила Стихий",
-    "Зеркало Рода", "Подарок Вселенной", "Кармический Узел", "Свет"
-]
+# --- ИНТЕРПРЕТАЦИИ ИЗ ВАШИХ ФАЙЛОВ ---
+NUMEROLOGY_DATA = {
+    "1": {
+        "female": "Женщины: деспот. При рождении милосердные, альтруисты. Если идет не так — болезни. В основе характера доброта, но происходит слом, и женщина остается в состоянии 'я сама'. Внутри нежная, снаружи — кирпич. Нужно проживать эмоции (плевать, кричать в землю, удары).",
+        "male": "Мужчины: любит отыгрываться на других, абьюзит семью. Если не нашел путь — деспот. Крайне высокая адаптивность, но при невозможности реализоваться считывается как мерзкий человек."
+    },
+    "2": "Энергия, контактность. 20 — дефицит, 22 — норма, 222+ — избыток (донор).",
+    "3": "Интерес к наукам, технике, творчеству. Фундамент познания.",
+    "4": "Здоровье, тело. Связь с физическим миром и выносливостью.",
+    "5": "Интуиция и логика. Планирование, предчувствие событий.",
+    "6": "Заземление, физический труд. Мастерство рук.",
+    "7": "Везение, ангел-хранитель. Помощь вселенной.",
+    "8": "Долг и Род. Восьмерка — это родовая история, связь с семьей, в которой человек родился.",
+    "9": "Память, экстрасенсорика. Родовой поток памяти. Проблемы здесь ведут к родовым болезням (Альцгеймер и др.).",
+    "11": "Число духовных учителей. Древняя душа, ведущая других к свету. Сложно распаковать.",
+    "12": "Самое сложное предназначение! После 20 лет — задача помогать людям через эзотерику. Сила слова.",
+    "22": "Сверхдоход. Задача перед родом — ставить большие цели и организовывать людей (бизнесмены)."
+}
 
 MYSTIC_PERSONA = (
-    "Ты — Хранитель Звездных Архивов, мудрый эзотерик. Твой стиль общения: мистический, "
-    "глубокий, но вдохновляющий. Используй метафоры. \n\n"
-    "ПРАВИЛА ОТВЕТА:\n"
-    "1. Структурируй ответ через Markdown: используй **жирный текст** для акцентов.\n"
-    "2. Дели текст на абзацы. \n"
-    "3. В прогнозе обязательно сочетай влияние знака зодиака, чисел и карты Рода.\n"
-    "4. В САМОМ КОНЦЕ ответа всегда добавляй строку: 'IMAGE_PROMPT: [краткое описание карты на английском языке для генерации картинки]'. "
-    "Описание должно быть в стиле фэнтези, мистики, таро."
+    "Ты — Оракул Рода. Твои ответы глубоки и метафоричны. "
+    "Ты используешь данные Психоматрицы (Квадрат Пифагора) для анализа. "
+    "Всегда связывай события с Родом и кармическими задачами. "
+    "Используй **Markdown** для оформления. "
+    "В конце ВСЕГДА добавляй: 'IMAGE_PROMPT: [fantasy mystical card description in English]'."
 )
+
+# --- СОСТОЯНИЯ ---
+class ProfileStates(StatesGroup):
+    waiting_for_birthdate = State()
+    waiting_for_gender = State()
 
 class HoroscopeStates(StatesGroup):
     waiting_for_sign_day = State()
-    waiting_for_sign_week = State()
 
-class NumerologyStates(StatesGroup):
-    waiting_for_birthdate = State()
+# --- ЛОГИКА РАСЧЕТА (ИЗ App.tsx) ---
+def get_psychomatrix(birthdate_str):
+    clean = birthdate_str.replace(".", "")
+    digits = [int(d) for d in clean]
+    
+    # 1 рабочее число
+    w1 = sum(digits)
+    # 2 рабочее число
+    w2 = sum(int(d) for d in str(w1))
+    # 3 рабочее число (первое число - 2 * первая цифра дня рождения)
+    first_digit = int(clean[0])
+    w3 = w1 - (2 * first_digit)
+    # 4 рабочее число
+    w4 = sum(int(d) for d in str(abs(w3)))
+    
+    all_numbers = clean + str(w1) + str(w2) + str(w3) + str(w4)
+    full_list = [int(d) for d in all_numbers if d.isdigit()]
+    
+    matrix = {}
+    for i in range(1, 10):
+        count = full_list.count(i)
+        matrix[i] = str(i) * count if count > 0 else f"{i}0"
+    
+    # Проверка спец. задач (11, 12, 22)
+    special = []
+    work_nums = [w1, w2, w3, w4]
+    for sn in [11, 12, 22]:
+        if sn in work_nums:
+            special.append(str(sn))
+            
+    return matrix, special
 
-class ProfileStates(StatesGroup):
-    waiting_for_new_birthdate = State()
-
-# --- ВСПОМОГАТЕЛЬНЫЕ ФУНКЦИИ ---
-def generate_image_url(prompt_text):
-    clean_prompt = prompt_text.replace("IMAGE_PROMPT:", "").strip()
-    full_prompt = f"mystical tarot card, esoteric symbol, {clean_prompt}, digital art, highly detailed, magical glow"
-    encoded = urllib.parse.quote(full_prompt)
-    seed = random.randint(1, 99999)
-    return f"https://image.pollinations.ai/prompt/{encoded}?width=1024&height=1024&seed={seed}&nologo=true"
-
-def parse_date(date_str):
-    try: return datetime.strptime(date_str, "%d.%m.%Y")
-    except: return None
-
-def reduce_number(num):
-    while num > 9 and num not in [11, 22, 33]:
-        num = sum(int(d) for d in str(num))
-    return num
-
-def calculate_universal_day(date_obj):
-    return reduce_number(date_obj.day + date_obj.month + date_obj.year)
-
-def calculate_personal_day(today_date, birth_date):
-    u_day = calculate_universal_day(today_date)
-    p_day = u_day + birth_date.month + birth_date.day
-    return reduce_number(p_day)
-
-async def ask_mystic(user_prompt: str) -> str:
-    try:
-        chat_completion = await groq_client.chat.completions.create(
-            messages=[
-                {"role": "system", "content": MYSTIC_PERSONA},
-                {"role": "user", "content": user_prompt}
-            ],
-            model="llama-3.3-70b-versatile",
-            temperature=0.8,
-            max_tokens=1500,
-        )
-        return chat_completion.choices[0].message.content
-    except Exception as e:
-        logging.error(f"Groq Error: {e}")
-        return "⚠️ Вибрации мироздания нарушены. Попробуй позже."
+def get_zodiac(date_obj):
+    d, m = date_obj.day, date_obj.month
+    if (m == 12 and d >= 22) or (m == 1 and d <= 19): return "♑ Козерог"
+    if (m == 1 and d >= 20) or (m == 2 and d <= 18): return "♒ Водолей"
+    if (m == 2 and d >= 19) or (m == 3 and d <= 20): return "♓ Рыбы"
+    if (m == 3 and d >= 21) or (m == 4 and d <= 19): return "♈ Овен"
+    if (m == 4 and d >= 20) or (m == 5 and d <= 20): return "♉ Телец"
+    if (m == 5 and d >= 21) or (m == 6 and d <= 20): return "♊ Близнецы"
+    if (m == 6 and d >= 21) or (m == 7 and d <= 22): return "♋ Рак"
+    if (m == 7 and d >= 23) or (m == 8 and d <= 22): return "♌ Лев"
+    if (m == 8 and d >= 23) or (m == 9 and d <= 22): return "♍ Дева"
+    if (m == 9 and d >= 23) or (m == 10 and d <= 22): return "♎ Весы"
+    if (m == 10 and d >= 23) or (m == 11 and d <= 21): return "♏ Скорпион"
+    return "♐ Стрелец"
 
 # --- КЛАВИАТУРЫ ---
 def get_main_kb():
-    buttons = [
-        [KeyboardButton(text="🔮 Комплексный прогноз на день")],
-        [KeyboardButton(text="🌟 Гороскоп на неделю")],
-        [KeyboardButton(text="🔢 Моя нумерология")],
-        [KeyboardButton(text="🎂 Мой профиль / Дата рождения")],
-        [KeyboardButton(text="🙏 Вопрос Оракулу")]
-    ]
-    return ReplyKeyboardMarkup(keyboard=buttons, resize_keyboard=True)
+    return ReplyKeyboardMarkup(keyboard=[
+        [KeyboardButton(text="🔮 Прогноз на день")],
+        [KeyboardButton(text="🔢 Психоматрица Рода")],
+        [KeyboardButton(text="🎂 Мой профиль")]
+    ], resize_keyboard=True)
 
-def get_zodiac_kb():
-    keyboard = []
-    row = []
-    for sign in ZODIAC_SIGNS:
-        row.append(KeyboardButton(text=sign))
-        if len(row) == 4:
-            keyboard.append(row)
-            row = []
-    if row: keyboard.append(row)
-    keyboard.append([KeyboardButton(text="🚫 Отмена")])
-    return ReplyKeyboardMarkup(keyboard=keyboard, resize_keyboard=True)
-
-def get_cancel_kb():
-    return ReplyKeyboardMarkup(keyboard=[[KeyboardButton(text="🚫 Отмена")]], resize_keyboard=True)
-
-# --- ХЭНДЛЕРЫ ---
+# --- ХЕНДЛЕРЫ ---
 
 @dp.message(Command("start"))
-async def cmd_start(message: types.Message):
-    await message.answer(
-        "✨ Приветствую, Искатель. Я — Оракул Рода.\n\n"
-        "Для точных предсказаний укажи дату рождения в Профиле.",
-        reply_markup=get_main_kb()
-    )
+async def start(message: types.Message, state: FSMContext):
+    await message.answer("✨ Приветствую в Обители Рода. Чтобы я мог видеть твой путь, укажи дату рождения (ДД.ММ.ГГГГ):")
+    await state.set_state(ProfileStates.waiting_for_birthdate)
 
-@dp.message(F.text == "🚫 Отмена")
-async def cmd_cancel(message: types.Message, state: FSMContext):
-    await state.clear()
-    await message.answer("Возвращаемся к истокам.", reply_markup=get_main_kb())
-
-@dp.message(F.text == "🎂 Мой профиль / Дата рождения")
-async def profile_handler(message: types.Message, state: FSMContext):
-    bday = get_user_birthdate(message.from_user.id)
-    await state.set_state(ProfileStates.waiting_for_new_birthdate)
-    text = f"Твоя дата в свитках: **{bday}**\nХочешь изменить? Введи ДД.ММ.ГГГГ" if bday else "Введи дату своего рождения (ДД.ММ.ГГГГ):"
-    await message.answer(text, reply_markup=get_cancel_kb(), parse_mode="Markdown")
-
-@dp.message(ProfileStates.waiting_for_new_birthdate)
-async def set_birthdate(message: types.Message, state: FSMContext):
-    date_obj = parse_date(message.text)
-    if date_obj:
-        set_user_birthdate(message.from_user.id, date_obj.strftime("%d.%m.%Y"))
-        await state.clear()
-        await message.answer("✅ Твоя судьба зафиксирована в звездах.", reply_markup=get_main_kb())
-    else:
-        await message.answer("Неверный формат. Попробуй еще раз: ДД.ММ.ГГГГ")
-
-@dp.message(F.text == "🔮 Комплексный прогноз на день")
-async def complex_forecast_start(message: types.Message, state: FSMContext):
-    await state.set_state(HoroscopeStates.waiting_for_sign_day)
-    await message.answer("🌌 Выбери свой знак зодиака:", reply_markup=get_zodiac_kb())
-
-@dp.message(HoroscopeStates.waiting_for_sign_day, F.text.in_(ZODIAC_SIGNS))
-async def process_complex_forecast(message: types.Message, state: FSMContext):
-    sign = message.text
-    now = datetime.now()
-    card = random.choice(ROD_CARDS)
-    bday_str = get_user_birthdate(message.from_user.id)
-    
-    status_msg = await message.answer("🧘 Соединяюсь с информационным полем...")
-    
-    p_info = ""
-    if bday_str:
-        bday_obj = parse_date(bday_str)
-        if bday_obj:
-            p_num = calculate_personal_day(now, bday_obj)
-            p_info = f"Личное число дня пользователя: {p_num}."
-
-    prompt = (
-        f"Прогноз на сегодня {now.strftime('%d.%m.%Y')}. Знак пользователя: {sign}. "
-        f"Выпавшая карта Рода: {card}. {p_info} \n"
-        "Дай развернутый прогноз и опиши значение карты."
-    )
-    
-    response = await ask_mystic(prompt)
-    
-    # Извлекаем промпт для картинки и чистим основной текст
-    final_text = response
-    img_url = generate_image_url(card) # Фолбэк на название карты
-    
-    if "IMAGE_PROMPT:" in response:
-        parts = response.split("IMAGE_PROMPT:")
-        final_text = parts[0].strip()
-        img_url = generate_image_url(parts[1].strip())
-
-    await status_msg.delete()
-    
+@dp.message(ProfileStates.waiting_for_birthdate)
+async def process_bday(message: types.Message, state: FSMContext):
     try:
-        await message.answer_photo(photo=img_url, caption=f"🎴 Карта дня: **{card}**", parse_mode="Markdown")
+        dt = datetime.strptime(message.text, "%d.%m.%Y")
+        await state.update_data(bday=message.text)
+        kb = InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text="Женщина", callback_data="gender_female"),
+             InlineKeyboardButton(text="Мужчина", callback_data="gender_male")]
+        ])
+        await message.answer("Твой земной пол?", reply_markup=kb)
+        await state.set_state(ProfileStates.waiting_for_gender)
     except:
-        await message.answer(f"🎴 Карта дня: **{card}**", parse_mode="Markdown")
+        await message.answer("Используй формат ДД.ММ.ГГГГ (например, 12.05.1990)")
 
-    await message.answer(final_text, reply_markup=get_main_kb(), parse_mode="Markdown")
+@dp.callback_query(F.data.startswith("gender_"))
+async def process_gender(callback: types.CallbackQuery, state: FSMContext):
+    gender = "female" if "female" in callback.data else "male"
+    data = await state.get_data()
+    db = load_db()
+    db[str(callback.from_user.id)] = {"birthdate": data['bday'], "gender": gender}
+    save_db(db)
+    await callback.message.edit_text(f"✅ Данные сохранены. Твой путь открыт.")
+    await callback.message.answer("Выбери действие:", reply_markup=get_main_kb())
     await state.clear()
 
-@dp.message(F.text == "🌟 Гороскоп на неделю")
-async def horoscope_week(message: types.Message, state: FSMContext):
-    await state.set_state(HoroscopeStates.waiting_for_sign_week)
-    await message.answer("🌌 Выбери знак для недельного прогноза:", reply_markup=get_zodiac_kb())
-
-@dp.message(HoroscopeStates.waiting_for_sign_week, F.text.in_(ZODIAC_SIGNS))
-async def process_sign_week(message: types.Message, state: FSMContext):
-    status = await message.answer("🌙 Считываю ритмы планет...")
-    response = await ask_mystic(f"Прогноз на неделю для знака {message.text}.")
-    # Очистка от технического промпта для картинки, если он там есть
-    clean_text = response.split("IMAGE_PROMPT:")[0]
+@dp.message(F.text == "🔢 Психоматрица Рода")
+async def show_matrix(message: types.Message):
+    user_data = load_db().get(str(message.from_user.id))
+    if not user_data: return await message.answer("Сначала настрой профиль.")
+    
+    matrix, special = get_psychomatrix(user_data['birthdate'])
+    m_view = f"| {matrix[1]} | {matrix[4]} | {matrix[7]} |\n| {matrix[2]} | {matrix[5]} | {matrix[8]} |\n| {matrix[3]} | {matrix[6]} | {matrix[9]} |"
+    
+    status = await message.answer("🌌 Раскладываю числовые потоки...")
+    
+    prompt = (
+        f"Проанализируй матрицу человека (пол: {user_data['gender']}).\n"
+        f"Матрица:\n{m_view}\nСпец. задачи: {', '.join(special)}.\n"
+        f"Используй базу данных интерпретаций: {json.dumps(NUMEROLOGY_DATA, ensure_ascii=False)}.\n"
+        "Сделай упор на предназначение и силу Рода."
+    )
+    
+    res = await ask_ai(prompt)
     await status.delete()
-    await message.answer(clean_text, reply_markup=get_main_kb(), parse_mode="Markdown")
-    await state.clear()
+    
+    # Генерация картинки на основе спец. задач или главной цифры
+    img_url = f"https://image.pollinations.ai/prompt/{urllib.parse.quote(special[0] if special else matrix[1])}?width=1024&height=1024&nologo=true"
+    
+    await message.answer_photo(photo=img_url, caption=f"✨ **Твоя Матрица:**\n`{m_view}`", parse_mode="Markdown")
+    await message.answer(res.split("IMAGE_PROMPT:")[0], parse_mode="Markdown")
 
-@dp.message(F.text == "🔢 Моя нумерология")
-async def numerology_start(message: types.Message, state: FSMContext):
-    bday = get_user_birthdate(message.from_user.id)
-    if not bday:
-        await state.set_state(NumerologyStates.waiting_for_birthdate)
-        await message.answer("Для этого ритуала нужна твоя дата рождения (ДД.ММ.ГГГГ):", reply_markup=get_cancel_kb())
-    else:
-        status = await message.answer("🔢 Раскладываю числа судьбы...")
-        response = await ask_mystic(f"Сделай нумерологический разбор даты рождения {bday}.")
-        await status.delete()
-        await message.answer(response.split("IMAGE_PROMPT:")[0], parse_mode="Markdown")
-
-@dp.message(NumerologyStates.waiting_for_birthdate)
-async def numerology_process(message: types.Message, state: FSMContext):
-    date_obj = parse_date(message.text)
-    if date_obj:
-        set_user_birthdate(message.from_user.id, date_obj.strftime("%d.%m.%Y"))
-        status = await message.answer("🔢 Раскладываю числа...")
-        response = await ask_mystic(f"Сделай нумерологический разбор даты рождения {message.text}.")
-        await state.clear()
-        await status.delete()
-        await message.answer(response.split("IMAGE_PROMPT:")[0], reply_markup=get_main_kb(), parse_mode="Markdown")
-    else:
-        await message.answer("Неверная дата.")
-
-@dp.message(F.text == "🙏 Вопрос Оракулу")
-async def oracle_mode(message: types.Message):
-    await message.answer("Сформулируй свой вопрос к Вселенной и отправь его мне...", reply_markup=get_cancel_kb())
-
-@dp.message()
-async def general_text_handler(message: types.Message):
-    status = await message.answer("🔮 Хранитель слушает...")
-    response = await ask_mystic(f"Ответь на вопрос: {message.text}")
+@dp.message(F.text == "🔮 Прогноз на день")
+async def daily_horoscope(message: types.Message):
+    user_data = load_db().get(str(message.from_user.id))
+    if not user_data: return await message.answer("Укажи дату в профиле.")
+    
+    dt = datetime.strptime(user_data['birthdate'], "%d.%m.%Y")
+    sign = get_zodiac(dt)
+    matrix, _ = get_psychomatrix(user_data['birthdate'])
+    
+    status = await message.answer("🔮 Обращаюсь к звездам...")
+    
+    prompt = (
+        f"Сегодня {datetime.now().strftime('%d.%m.%Y')}. Знак: {sign}. "
+        f"Его матрица (единицы: {matrix[1]}, восьмерки: {matrix[8]}). "
+        "Дай прогноз на день, связывая энергию знака и его чисел."
+    )
+    
+    res = await ask_ai(prompt)
     await status.delete()
-    await message.answer(response.split("IMAGE_PROMPT:")[0], parse_mode="Markdown")
+    
+    clean_text = res.split("IMAGE_PROMPT:")[0]
+    img_prompt = res.split("IMAGE_PROMPT:")[1] if "IMAGE_PROMPT:" in res else "mystical oracle card"
+    
+    img_url = f"https://image.pollinations.ai/prompt/{urllib.parse.quote(img_prompt)}?width=1024&height=1024&nologo=true&seed={random.randint(1,999)}"
+    
+    await message.answer_photo(photo=img_url, caption=f"🌟 Прогноз для знака {sign}")
+    await message.answer(clean_text, parse_mode="Markdown")
 
-# --- ЗАПУСК ---
-async def handle(request):
-    return web.Response(text="Oracle is active")
+async def ask_ai(prompt):
+    try:
+        completion = await groq_client.chat.completions.create(
+            messages=[{"role": "system", "content": MYSTIC_PERSONA}, {"role": "user", "content": prompt}],
+            model="llama-3.3-70b-versatile",
+            temperature=0.7
+        )
+        return completion.choices[0].message.content
+    except Exception as e:
+        return f"⚠️ Эфир затуманен... ({e})"
+
+@dp.message(F.text == "🎂 Мой профиль")
+async def show_profile(message: types.Message):
+    user_data = load_db().get(str(message.from_user.id))
+    if not user_data:
+        await message.answer("Профиль пуст. Нажми /start")
+    else:
+        await message.answer(f"📅 Дата: {user_data['birthdate']}\n👤 Пол: {user_data['gender']}\n\nЧтобы изменить, нажми /start")
+
+# --- ВЕБ-СЕРВЕР ---
+async def handle(request): return web.Response(text="Oracle is online")
 
 async def main():
     app = web.Application()
     app.router.add_get('/', handle)
     runner = web.AppRunner(app)
     await runner.setup()
-    site = web.TCPSite(runner, '0.0.0.0', PORT)
-    await site.start()
-    
+    await web.TCPSite(runner, '0.0.0.0', PORT).start()
     await bot.delete_webhook(drop_pending_updates=True)
     await dp.start_polling(bot)
 
 if __name__ == "__main__":
-    try:
-        asyncio.run(main())
-    except KeyboardInterrupt:
-        pass
+    asyncio.run(main())
